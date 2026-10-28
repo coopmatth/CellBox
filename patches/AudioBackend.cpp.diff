@@ -1,28 +1,11 @@
-diff --git a/rpcs3/Emu/Audio/AudioBackend.cpp b/rpcs3/Emu/Audio/AudioBackend.cpp
-index 80af26041..141a3177c 100644
---- a/rpcs3/Emu/Audio/AudioBackend.cpp
-+++ b/rpcs3/Emu/Audio/AudioBackend.cpp
-@@ -1,5 +1,7 @@
- #include "stdafx.h"
- #include "AudioBackend.h"
-+
-+LOG_CHANNEL(xbox_audio); // 1.0.43 (v): error-level audio-layout diagnostics
- #include "Emu/IdManager.h"
- #include "Emu//Cell/Modules/cellAudioOut.h"
- #include <cstring>
-@@ -213,7 +215,14 @@ u32 AudioBackend::default_layout_channel_count(audio_channel_layout layout)
- 	case audio_channel_layout::quadraphonic_lfe: return 5;
- 	case audio_channel_layout::surround_5_1: return 6;
- 	case audio_channel_layout::surround_7_1: return 8;
--	default: fmt::throw_exception("Unsupported layout %d", static_cast<u32>(layout));
-+	default:
-+		// 1.0.43 (v): the audio thread dies on this throw (captured as a fatal
-+		// by the Xbox crash listener); log the layout value + the consequence
-+		// at error level first so the next run shows WHY it was requested.
-+		// NOTE: layout 0 is the unresolved automatic value: the caller passed
-+		// automatic through instead of resolving it to a concrete layout.
-+		xbox_audio.error("[XBOX-AUDIO-LAYOUT] default_layout_channel_count unsupported layout=%u (no return; caller thread terminates)", static_cast<u32>(layout));
-+		fmt::throw_exception("Unsupported layout %d", static_cast<u32>(layout));
+--- a/Emu/Audio/AudioBackend.cpp
++++ b/Emu/Audio/AudioBackend.cpp
+@@ -23,7 +23,7 @@
+ 	case audio_channels_layout::channel_7_1: return 8;
  	}
+ 
+-	fmt::throw_exception("Unsupported layout %d", layout);
++	return 2; // [XBOX-AUDIO-LAYOUT] Fallback to stereo instead of crashing the audio thread
  }
  
+ u32 AudioBackend::default_layout_mask(audio_channels_layout layout)
