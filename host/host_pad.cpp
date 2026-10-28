@@ -273,11 +273,11 @@ void pad_thread::Init()
     {
         m_pads[i] = std::make_shared<Pad>(
             pad_handler::null, i,
-            CELL_PAD_STATUS_DISCONNECTED,
+            (i == 0) ? (CELL_PAD_STATUS_CONNECTED | CELL_PAD_STATUS_ASSIGN_CHANGES) : CELL_PAD_STATUS_DISCONNECTED,
             CELL_PAD_CAPABILITY_PS3_CONFORMITY | CELL_PAD_CAPABILITY_PRESS_MODE | CELL_PAD_CAPABILITY_ACTUATOR,
             CELL_PAD_DEV_TYPE_STANDARD);
         m_pads[i]->m_class_type = CELL_PAD_PCLASS_TYPE_STANDARD;
-        m_pads_connected[i] = false;
+        m_pads_connected[i] = (i == 0);
     }
     {
         auto& pad = m_pads[0];
@@ -340,7 +340,7 @@ void pad_thread::Init()
         // Default stick centre (external already 128; internal too).
         for (auto& s : pad->m_sticks) s.m_value = 128;
     }
-    m_info.now_connect = 0;
+    m_info.now_connect = 1;
     m_info.system_info = 0;
     m_info.ignore_input = false;
     num_ldd_pad = 0;
@@ -355,7 +355,7 @@ void pad_thread::operator()()
     // Stay alive while emulation runs; return when Emu stops so the
     // named_thread join on teardown completes. Re-init on reset flag,
     // mirroring the real thread's reset handling in miniature.
-    // v1.0.29: poll WGI into player 0 on every 100 ms tick.
+    // 1.0.44: poll WGI on every 16 ms tick (catch fast taps).
     while (!Emu.IsStopped())
     {
         if (pad::g_reset.load())
@@ -364,7 +364,7 @@ void pad_thread::operator()()
             pad::g_reset = false;
         }
         update_pad_states();
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
 }
 
@@ -411,7 +411,7 @@ void pad_thread::update_pad_states()
     // enumeration itself sees the controller.
     auto diag = [&]()
     {
-        if ((g_wgi_polls.load() % 10) != 1)
+        if ((g_wgi_polls.load() % 60) != 1) // adjusted for 16ms poll ~1 per sec
             return;
         u32 d1 = 0, d2 = 0;
         for (const auto& b : pad->m_buttons_external)
