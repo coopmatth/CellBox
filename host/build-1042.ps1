@@ -460,17 +460,13 @@ if ($manifest -notmatch 'Version="1\.0\.42\.0"') { throw "manifest version injec
 
 Set-Content -Path "$stage\AppxManifest.xml" -Value $manifest -Encoding UTF8
 
-Write-Host "== certificate (local dev cert CN=RPCS3SpikeDev) =="
-
-# Dev-only signing password for the locally generated certificate.
-# Replace with your own value; it is never used for any account or service.
-$certPassword = "CHANGE-ME-DEV-ONLY"
+Write-Host "== certificate (reuse spike dev cert CN=RPCS3SpikeDev) =="
 
 $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -eq "CN=RPCS3SpikeDev" } | Select-Object -First 1
 
 if (-not $cert) { throw "spike dev cert CN=RPCS3SpikeDev not found - run xbox-spikes build first" }
 
-$pw = ConvertTo-SecureString -String $certPassword -Force -AsPlainText
+$pw = ConvertTo-SecureString -String "CHANGE-ME-DEV-ONLY" -Force -AsPlainText
 
 Export-PfxCertificate -Cert $cert -FilePath "$out\host.pfx" -Password $pw | Out-Null
 
@@ -486,7 +482,7 @@ if (Test-Path $msix) { Remove-Item $msix -Force }
 
 if ($LASTEXITCODE -ne 0) { throw "makeappx failed" }
 
-& "$sdk\signtool.exe" sign /fd SHA256 /f "$out\host.pfx" /p $certPassword $msix
+& "$sdk\signtool.exe" sign /fd SHA256 /f "$out\host.pfx" /p CHANGE-ME-DEV-ONLY $msix
 
 if ($LASTEXITCODE -ne 0) { throw "signtool failed" }
 

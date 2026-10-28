@@ -51,6 +51,16 @@ patch set, alongside the scaffolding from the first commit.
 | `host/blit_vs.hlsl`, `host/blit_ps.hlsl`, `host/slice_ps.hlsl`, `host/control_vs.hlsl`, `host/control_ps.hlsl` | HLSL sources for the blit, slice, and signed-control shaders. The build script compiles them with dxc and regenerates `slice_shaders.h` at build time — that header is a build output, not a source. |
 | `host/pso_probe.cpp`, `host/present_probe.cpp`, `host/draw_probe.cpp`, `host/audio_pad_probe.cpp`, `host/ws2_stub.cpp`, `host/stage_diag.cpp`, `host/stage_diag.h`, `host/main_desktop.cpp`, `host/iat_table.inc` | Probe/stub objects linked into the shipped exe and the desktop pre-test (PSO, present, draw, audio/pad, WS2_32 stub, stage diagnostics). |
 | `host/build-1043.ps1` | Current host build script (same role as `build-1042.ps1`, for the 1.0.43 main). |
+| `host/main_frontend.cpp` | UWP entry point for the frontend builds: the game-library app (library screen, boot, compile pre-bake, delete). |
+| `host/frontend/frontend_library.h`, `host/frontend/frontend_library.cpp` | Game library scan (LocalState + USB) over the FromApp file APIs; boot-target resolution; game delete (folder tree, or ISO + its staging parts). |
+| `host/frontend/frontend_boot.h`, `host/frontend/frontend_boot.cpp` | Handoff from the library to the existing boot-probe BootGame path with the selected library entry; stop/join tracking for the return to the library. |
+| `host/frontend/frontend_compile.h`, `host/frontend/frontend_compile.cpp` | Compile (pre-bake) support: module enumeration over a folder entry's install dir, cache statistics, shader-coverage reporting. |
+| `host/frontend/frontend_input.h`, `host/frontend/frontend_input.cpp` | Gamepad menu navigation on the WGI layer; menu pad state is separate from the game pad state. |
+| `host/frontend/frontend_progress.h`, `host/frontend/frontend_progress.cpp` | Notice/trace progress piping: core log broadcast plus the core's own progress globals, surfaced to the UI and the host log. |
+| `host/frontend/frontend_ui.h`, `host/frontend/frontend_ui.cpp` | D3D12 library UI on the CoreWindow swapchain (not XAML): library, actions, delete-confirm, loading/compiling, and stopping screens. |
+| `host/frontend/ui_vs.hlsl`, `host/frontend/ui_ps.hlsl` | HLSL sources for the UI quads. The build script compiles them with dxc and regenerates `ui_shaders.h` and `font_atlas.h` at build time — those headers are build outputs, not sources. |
+| `host/frontend/frontend_desktop_test.cpp` | Desktop pre-test for the frontend, built and run by the frontend build script before packaging. |
+| `host/build-frontend-113.ps1` | Current frontend build script (same role as `build-1043.ps1`, for the frontend main). |
 | `host/core-build-1043.ps1`, `host/lib-surgery-1043.ps1`, `host/manual-ppu.ps1` | Core-library build tooling: the core rebuild driver, the library member-swap procedure, and the manual single-object compile used when the project file cannot compile a touched core file. |
 | `memory/memory_governor.cpp`, `memory/memory_governor.h`, `memory/desktop_sampler.h` | Memory governor: enforces the 5 GiB Game-tier budget for guest allocations. |
 | `d3d12-backend/d3d12_gsrender.cpp`, `d3d12-backend/d3d12_gsrender.h` | D3D12 GSRender prototype backing the pre-test and the linked GSRender object. |
@@ -63,7 +73,8 @@ patch set, alongside the scaffolding from the first commit.
 | `docs/deploy-README.md` | Manual install steps for a built package. |
 
 Tree completeness and path mapping: the build script expects the PC layout
-under `C:\rpcs3` — `host/` maps to `xbox-uwp-host/`, `stubs/` to
+under `C:\rpcs3` — `host/` maps to `xbox-uwp-host/`, `host/frontend/` to
+`xbox-uwp-host/frontend/`, `stubs/` to
 `xbox-core-lib/linktest/`, `memory/` to `xbox-memory/`, `d3d12-backend/` to
 `xbox-d3d12-backend/`, `emu-link/` to `xbox-emu-link/`, and `dxil/` to
 `xbox-dxil/`. Two inputs are generated, not stored: `slice_shaders.h`

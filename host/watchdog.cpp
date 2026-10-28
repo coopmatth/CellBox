@@ -24,6 +24,14 @@ std::atomic<unsigned long long> g_tick{0};
 std::atomic<bool> g_started{false};
 std::atomic<unsigned long long> g_host_loop_tick{0};
 std::atomic<unsigned> g_host_loop_stage{0};
+// FRONTEND (1.1.2): teardown latch - see watchdog.h. Set when a stop
+// is requested (or teardown is otherwise pending), cleared at the
+// next BootGame. Gates the PPU thread summary below.
+std::atomic<bool> g_teardown_pending{false};
+// Watchdog-thread-only: the summary-skip line is written once per
+// gated period, not once per summary tick (the tick cadence is 1 s
+// and a gated period can last the whole library session).
+bool g_summary_skip_logged = false;
 
 void wd_write_locked(const char* line, unsigned long len)
 {
@@ -61,17 +69,48 @@ void watchdog_loop()
             ReleaseSRWLockExclusive(&g_wd_lock);
         }
         // 1.0.43 (v): PPU thread summary every 500 ticks (~30 s at 1 s cadence).
+        // FRONTEND (1.1.2) GATE: run it ONLY while the emulator is in an
+        // active state AND no stop/teardown is pending.
+        // xbox_ppu_thread_summary walks the core's PPU thread objects
+        // via idm::select; after Emu.Kill, the Emulation Join Thread
+        // destroys those objects on its own schedule, and Kill flips
+        // the emu state to stopped=0 long before the join finishes -
+        // so emu==0 is itself a teardown window, not a safe state.
+        // The 1.1.1 console run crashed with an unhandled AV
+        // (0xC0000005, rcx=0xCCCCCCCCCCCCCCCC) inside this call at
+        // exactly tick=500 with emu=0, after the compile-pass stop
+        // (boot-watchdog-111.txt ends at that tick; the AV is in
+        // boot-veh-log-111.txt).
         if ((t % 500) == 0)
         {
-            char pbuf[1024];
-            if (xbox_ppu_thread_summary(pbuf, sizeof(pbuf)))
+            const bool emu_active = (emu == 1 || emu == 3 || emu == 4 || emu == 6 || emu == 7);
+            if (emu_active && !g_teardown_pending.load())
             {
-                char pline[1152];
-                int pn = std::snprintf(pline, sizeof(pline), "BOOT-PPU-SUMMARY tick=%llu %s\r\n", t, pbuf);
-                if (pn > 0)
+                char pbuf[1024];
+                if (xbox_ppu_thread_summary(pbuf, sizeof(pbuf)))
+                {
+                    char pline[1152];
+                    int pn = std::snprintf(pline, sizeof(pline), "BOOT-PPU-SUMMARY tick=%llu %s\r\n", t, pbuf);
+                    if (pn > 0)
+                    {
+                        AcquireSRWLockExclusive(&g_wd_lock);
+                        wd_write_locked(pline, static_cast<unsigned long>(pn));
+                        ReleaseSRWLockExclusive(&g_wd_lock);
+                    }
+                }
+                g_summary_skip_logged = false;
+            }
+            else if (!g_summary_skip_logged)
+            {
+                g_summary_skip_logged = true;
+                char sbuf[512];
+                int sn = std::snprintf(sbuf, sizeof(sbuf),
+                    "BOOT-PPU-SUMMARY-SKIPPED tick=%llu emu=%d teardown_pending=%d (1.1.2 gate: never enumerate core PPU threads while stopped or tearing down)\r\n",
+                    t, emu, g_teardown_pending.load() ? 1 : 0);
+                if (sn > 0)
                 {
                     AcquireSRWLockExclusive(&g_wd_lock);
-                    wd_write_locked(pline, static_cast<unsigned long>(pn));
+                    wd_write_locked(sbuf, static_cast<unsigned long>(sn));
                     ReleaseSRWLockExclusive(&g_wd_lock);
                 }
             }
@@ -126,6 +165,22 @@ void watchdog_start(const std::string& localStateUtf8)
 void watchdog_boot_returned()
 {
     g_boot_tick.store(GetTickCount64());
+}
+
+// FRONTEND (1.1.2): teardown latch (see watchdog.h).
+void watchdog_note_boot_started()
+{
+    g_teardown_pending.store(false);
+}
+
+void watchdog_note_stop_requested()
+{
+    g_teardown_pending.store(true);
+}
+
+bool watchdog_teardown_pending()
+{
+    return g_teardown_pending.load();
 }
 
 void watchdog_marker(const char* m)

@@ -460,7 +460,7 @@ boot_outcome boot_phase(const std::string& localStateUtf8,
     // fixup_settings forces psn_status=disabled when net_active is
     // disabled, so Simulated requires net=enabled AND psn=psn_fake.
     g_cfg.video.renderer.set(video_renderer::null);
-    g_cfg.audio.channels.set(audio_channels_layout::stereo); // 1.0.44 fix: prevent layout 0 cellAudio crash
+	g_cfg.audio.channel_layout.set(audio_channel_layout::stereo); // 1.0.44 fix: prevent layout 0 cellAudio crash (adapted: this tree names the member channel_layout and the enum audio_channel_layout)
     g_cfg.core.llvm_threads.set(1);
     g_cfg.net.net_active.set(np_internet_status::enabled);
     g_cfg.net.psn_status.set(np_psn_status::psn_fake);

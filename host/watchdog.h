@@ -39,6 +39,21 @@ unsigned long long watchdog_tick64();
 void watchdog_host_loop_mark(unsigned long long tick, unsigned stage);
 unsigned long long watchdog_host_loop_tick();
 unsigned watchdog_host_loop_stage();
+// FRONTEND (1.1.2): stop/teardown latch for the PPU-summary gate.
+// watchdog_note_boot_started() clears it (the frontend boot phases
+// call it at every BootGame); watchdog_note_stop_requested() sets it
+// (Emu.Kill issued via boot_request_stop, or the frontend's teardown
+// wait entered after a natural stop / folder-scan self-Kill). While
+// the latch is set - or the emulator state is stopped - watchdog_loop
+// must NOT call xbox_ppu_thread_summary: that function enumerates the
+// core's PPU thread objects through idm::select, and after a stop the
+// core's Emulation Join Thread destroys those objects asynchronously.
+// The 1.1.1 console run died on an unhandled AV inside exactly that
+// call (watchdog tick=500, emu=0, after the compile-pass stop; see
+// boot-veh-log-111.txt).
+void watchdog_note_boot_started();
+void watchdog_note_stop_requested();
+bool watchdog_teardown_pending();
 // 1.0.43 (v) PPU thread summary (defined in core PPUThread.cpp, linked via
 // emucore.lib). Fills buf with one summary line (no trailing newline).
 bool xbox_ppu_thread_summary(char* buf, unsigned long len);
