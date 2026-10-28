@@ -1,0 +1,57 @@
+diff --git a/rpcs3/Emu/Cell/PPUThread.cpp b/rpcs3/Emu/Cell/PPUThread.cpp
+index dfcc5ab11..599aabad9 100644
+--- a/rpcs3/Emu/Cell/PPUThread.cpp
++++ b/rpcs3/Emu/Cell/PPUThread.cpp
+@@ -6220,3 +6220,52 @@ static void ppu_initialize2(jit_compiler& jit, const ppu_module<lv2_obj>& module
+ 	jit.add(std::move(_module), cache_path);
+ #endif // LLVM_AVAILABLE
+ }
++
++// ---- 1.0.43 (v) Xbox PPU thread summary (host watchdog, every 500 ticks) ----
++// One line, no trailing newline; always true (total=0 before boot / after stop).
++// Called from the host watchdog thread: idm::select is lock-protected, and the
++// per-thread reads below are diagnostic-only. Listed threads capped at 16.
++// No new includes needed: fmt + std::string are already used by this TU.
++bool xbox_ppu_thread_summary(char* buf, unsigned long len)
++{
++	if (!buf || len == 0)
++		return false;
++	struct entry
++	{
++		u32 id;
++		std::string name;
++		u32 cia;
++		const char* st;
++	};
++	entry list[16];
++	unsigned listed = 0;
++	unsigned total = 0, run = 0, wait = 0, paused = 0, stop = 0;
++	idm::select<named_thread<ppu_thread>>([&](u32 id, named_thread<ppu_thread>& thread)
++	{
++		++total;
++		const char* st;
++		if (thread.is_stopped()) { ++stop; st = "STOP"; }
++		else if (thread.is_paused()) { ++paused; st = "PAUSED"; }
++		else if (!!(thread.state.load() & cpu_flag::wait)) { ++wait; st = "WAIT"; }
++		else { ++run; st = "RUN"; }
++		if (listed < 16)
++		{
++			entry& e = list[listed++];
++			e.id = id;
++			e.cia = thread.cia;
++			e.st = st;
++			e.name = thread.get_name();
++		}
++	});
++	std::string out = fmt::format("total={} run={} wait={} paused={} stop={} threads=[",
++		total, run, wait, paused, stop);
++	for (unsigned i = 0; i < listed; ++i)
++		out += fmt::format("id=0x{:X} {} cia=0x{:X} {}; ", list[i].id, list[i].name, list[i].cia, list[i].st);
++	if (total > listed)
++		out += fmt::format("+{} more; ", total - listed);
++	out += "]";
++	const usz n = std::min<usz>(out.size(), len - 1);
++	std::memcpy(buf, out.c_str(), n);
++	buf[n] = 0;
++	return true;
++}

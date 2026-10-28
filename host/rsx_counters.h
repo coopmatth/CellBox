@@ -69,3 +69,5 @@ std::atomic<bool>* d3d12_bridge_owns_ptr();
 // live in boot-watchdog.txt as BOOT-DRAW-SKIP first occurrences).
 std::uint64_t d3d12_rsx_real_draws();
 std::uint64_t d3d12_rsx_real_skips();
+// 1.0.43 (i): inlined_array skips (defined in d3d12_rsx.cpp).
+std::uint64_t d3d12_rsx_inlined_skips();

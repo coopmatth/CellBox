@@ -1,0 +1,16 @@
+diff --git a/rpcs3/Emu/Cell/Modules/cellPad.cpp b/rpcs3/Emu/Cell/Modules/cellPad.cpp
+index da69da434..eec6ea287 100644
+--- a/rpcs3/Emu/Cell/Modules/cellPad.cpp
++++ b/rpcs3/Emu/Cell/Modules/cellPad.cpp
+@@ -718,6 +718,11 @@ error_code cellPadGetData(u32 port_no, vm::ptr<CellPadData> data)
+ 
+ 	pad_get_data(port_no, data.get_ptr());
+ 
++	// 1.0.43 (iii): guest-side delivery proof. Error level: the Xbox crash
++	// listener mirrors error/fatal only (warning/trace would not reach the log).
++	if (data->button[CELL_PAD_BTN_OFFSET_DIGITAL1] != 0 || data->button[CELL_PAD_BTN_OFFSET_DIGITAL2] != 0)
++		cellPad.error("[PAD-DELIVERED] port=%u d1=0x%X d2=0x%X", port_no, data->button[CELL_PAD_BTN_OFFSET_DIGITAL1], data->button[CELL_PAD_BTN_OFFSET_DIGITAL2]);
++
+ 	if (g_cfg.io.pad_debug_overlay && !g_cfg.video.debug_overlay && port_no == 0)
+ 	{
+ 		show_debug_overlay(*data, *pad, config);

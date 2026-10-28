@@ -1,0 +1,62 @@
+diff --git a/rpcs3/util/vm_native.cpp b/rpcs3/util/vm_native.cpp
+index 2bd422b59..1568c03b1 100644
+--- a/rpcs3/util/vm_native.cpp
++++ b/rpcs3/util/vm_native.cpp
+@@ -492,7 +492,10 @@ namespace utils
+ 	{
+ #ifdef _WIN32
+ 		const ULARGE_INTEGER max_size{ .QuadPart = m_size };
+-		m_handle = ensure(::CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_EXECUTE_READWRITE, max_size.HighPart, max_size.LowPart, nullptr));
++		// Flag 4: SEC_RESERVE -- section and its views charge no commit until
++		// pages are committed with VirtualAlloc (utils::memory_commit).
++		// Only valid for pagefile-backed sections such as this one.
++		m_handle = ensure(::CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_EXECUTE_READWRITE | (flags & 4 ? SEC_RESERVE : 0), max_size.HighPart, max_size.LowPart, nullptr));
+ #elif defined(__linux__) || defined(__FreeBSD__)
+ 		m_file = -1;
+ 
+@@ -838,7 +841,9 @@ namespace utils
+ 
+ 		if (auto ret = static_cast<u8*>(::MapViewOfFileEx(m_handle, access, 0, 0, m_size, ptr)))
+ 		{
+-			if (prot != protection::rw && prot != protection::wx)
++			// SEC_RESERVE (flag 4): see map_critical -- protection is applied
++			// at commit time, VirtualProtect cannot run on reserved pages.
++			if (!(m_flags & 4) && prot != protection::rw && prot != protection::wx)
+ 			{
+ 				DWORD old;
+ 				if (!::VirtualProtect(ret, m_size, +prot, &old))
+@@ -951,7 +956,10 @@ namespace utils
+ 
+ 			if (MapViewOfFile3(m_handle, GetCurrentProcess(), target, 0, m_size, MEM_REPLACE_PLACEHOLDER, access, nullptr, 0))
+ 			{
+-				if (prot != protection::rw && prot != protection::wx)
++				// SEC_RESERVE (flag 4) views are MEM_RESERVE: inaccessible until
++				// committed (with final protection) via utils::memory_commit.
++				// VirtualProtect would fail on reserved pages, so skip it.
++				if (!(m_flags & 4) && prot != protection::rw && prot != protection::wx)
+ 				{
+ 					DWORD old;
+ 					if (!::VirtualProtect(target, m_size, +prot, &old))
+@@ -964,7 +972,7 @@ namespace utils
+ 				return {target, {}};
+ 			}
+ 
+-			return {nullptr, "Failed to map3"};
++			return {nullptr, fmt::format("Failed to map3 (%s)", fmt::win_error{GetLastError(), nullptr})};
+ 		}
+ 
+ 		if (!::VirtualFree(mem.AllocationBase, 0, MEM_RELEASE))
+@@ -1050,8 +1058,11 @@ namespace utils
+ 			::MEMORY_BASIC_INFORMATION mem{}, mem2{};
+ 			ensure(::VirtualQuery(target - 1, &mem, sizeof(mem)) && ::VirtualQuery(target + m_size, &mem2, sizeof(mem2)));
+ 
+-			const auto size1 = mem.State == MEM_RESERVE ? target - static_cast<u8*>(mem.AllocationBase) : 0;
+-			const auto size2 =  mem2.State == MEM_RESERVE ? mem2.RegionSize : 0;
++			// A neighbouring SEC_RESERVE view also reports MEM_RESERVE; only
++			// placeholders (MEM_PRIVATE) may be included in the coalesce range,
++			// section views report MEM_MAPPED and must stop it.
++			const auto size1 = mem.State == MEM_RESERVE && mem.Type == MEM_PRIVATE ? target - static_cast<u8*>(mem.AllocationBase) : 0;
++			const auto size2 =  mem2.State == MEM_RESERVE && mem2.Type == MEM_PRIVATE ? mem2.RegionSize : 0;
+ 
+ 			if (!size1 && !size2)
+ 			{

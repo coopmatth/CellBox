@@ -5,8 +5,9 @@ Dev Mode, packaged as a **Game**. Xbox Dev Mode has no Vulkan, so the RSX
 graphics backend is DirectX 12, and shaders reach the console as pre-baked,
 signed DXIL — the console never compiles shaders itself.
 
-This is the first commit: the host scaffolding and build tooling. The remaining
-host sources and the core patch set follow in a later commit.
+This commit completes the host tree: the D3D12 RSX backend, the pad
+implementation, the watchdog, the link stubs and probe objects, and the core
+patch set, alongside the scaffolding from the first commit.
 
 ## Why a Game package, and why D3D12
 
@@ -42,13 +43,34 @@ host sources and the core patch set follow in a later commit.
 | `host/build-1042.ps1` | Host build script: compiles the host objects, links against the prebuilt core library, injects the manifest version, packs and signs the MSIX, and runs the shipped-binary gate (string checks, hash checks). |
 | `host/deploy.ps1` | Device Portal operations: certificate install, package install, package list, state, launch, fetch. Takes the Portal address as a `-Portal` runtime parameter — never committed. |
 | `host/AppxManifest.xml` | Package manifest template. The build script injects the real package name and version at stage time. |
+| `host/main_uwp_1043.cpp` | Current UWP entry point (1.0.43 build). The 1042 main is kept alongside as versioned history. |
+| `host/d3d12_rsx.h`, `host/d3d12_rsx.cpp` | D3D12 RSX backend: translates the RSX command stream into D3D12 work (display slice, scratch render targets, passthrough shaders, semaphore logging). |
+| `host/host_pad.cpp` | Windows.Gaming.Input pad implementation (polling, edge logging, Cell pad delivery). |
+| `host/watchdog.h`, `host/watchdog.cpp` | Host watch loop support: RSX sustained reporting, host-loop liveness, periodic PPU summaries. |
+| `host/crash_capture.h`, `host/early_config_dir.h` | Headers for the crash-capture and early-config-directory modules. |
+| `host/blit_vs.hlsl`, `host/blit_ps.hlsl`, `host/slice_ps.hlsl`, `host/control_vs.hlsl`, `host/control_ps.hlsl` | HLSL sources for the blit, slice, and signed-control shaders. The build script compiles them with dxc and regenerates `slice_shaders.h` at build time — that header is a build output, not a source. |
+| `host/pso_probe.cpp`, `host/present_probe.cpp`, `host/draw_probe.cpp`, `host/audio_pad_probe.cpp`, `host/ws2_stub.cpp`, `host/stage_diag.cpp`, `host/stage_diag.h`, `host/main_desktop.cpp`, `host/iat_table.inc` | Probe/stub objects linked into the shipped exe and the desktop pre-test (PSO, present, draw, audio/pad, WS2_32 stub, stage diagnostics). |
+| `host/build-1043.ps1` | Current host build script (same role as `build-1042.ps1`, for the 1.0.43 main). |
+| `host/core-build-1043.ps1`, `host/lib-surgery-1043.ps1`, `host/manual-ppu.ps1` | Core-library build tooling: the core rebuild driver, the library member-swap procedure, and the manual single-object compile used when the project file cannot compile a touched core file. |
+| `memory/memory_governor.cpp`, `memory/memory_governor.h`, `memory/desktop_sampler.h` | Memory governor: enforces the 5 GiB Game-tier budget for guest allocations. |
+| `d3d12-backend/d3d12_gsrender.cpp`, `d3d12-backend/d3d12_gsrender.h` | D3D12 GSRender prototype backing the pre-test and the linked GSRender object. |
+| `emu-link/emu_link.cpp`, `emu-link/emu_link.h`, `emu-link/reassemble.cpp`, `emu-link/reassemble.h` | Emulator link layer and chunked-upload reassembly (firmware/game files staged into app storage). |
+| `stubs/host-stubs.cpp`, `stubs/uwp-stubs.cpp`, `stubs/fatal_log.h` | Link stubs for symbols the core references but the host does not implement (Qt GUI, unused peripherals), plus the fatal-file writer. The `fatal_log.h` here is the linktest version — the one compiled with these stubs. |
+| `tools/xbox-uwp-link-test2.ps1` | Link-test driver: compiles the UWP stubs and assembles `libsu.rsp` (the core build's CMake dependency libs minus SDL3-static) for the host link. |
+| `patches/*.diff` | Core patch set against upstream `RPCS3/rpcs3` at `e8979d31` (see `patches/README.md`). Diffs only — no full upstream files, no library binaries. |
 | `dxil/dxil_sign_candidate.h` | DXBC container-hash signer: wraps a DXIL blob so the console accepts it as signed. |
 | `docs/xbox-tuning.yaml` | Starting tuning profile for Series S (720p, LLVM recompilers, governor budgets). Starting values to test, not proven values. |
 | `docs/deploy-README.md` | Manual install steps for a built package. |
 
-Not in this commit (follow later): the D3D12 RSX backend sources, the pad
-implementation, the watchdog, and the core patch set (guest-memory mapping,
-semaphore logging, and related core changes).
+Tree completeness and path mapping: the build script expects the PC layout
+under `C:\rpcs3` — `host/` maps to `xbox-uwp-host/`, `stubs/` to
+`xbox-core-lib/linktest/`, `memory/` to `xbox-memory/`, `d3d12-backend/` to
+`xbox-d3d12-backend/`, `emu-link/` to `xbox-emu-link/`, and `dxil/` to
+`xbox-dxil/`. Two inputs are generated, not stored: `slice_shaders.h`
+(regenerated by the build script from the HLSL sources) and `libsu.rsp`
+(generated from the core build's CMake dependency libs via
+`tools/xbox-uwp-link-test2.ps1`). The prebuilt `emucore.lib` itself comes
+from the upstream build, not from this repo.
 
 ## Build intentions
 
@@ -86,17 +108,17 @@ console. The intended pipeline:
 #    (core edits always require the library rebuild before the host build)
 
 # 2. Run the host build script from the host directory:
-powershell -ExecutionPolicy Bypass -File build-1042.ps1
+powershell -ExecutionPolicy Bypass -File build-1043.ps1
 
 # 3. Install the built package (Portal address is a runtime parameter):
-Copy-Item -Force out\XboxUwpHost-1042.msix out\XboxUwpHost.msix
+Copy-Item -Force out\XboxUwpHost-1043.msix out\XboxUwpHost.msix
 powershell -ExecutionPolicy Bypass -File deploy.ps1 -Portal <YOUR-XBOX-DEV-MODE-PORTAL> -Phase Install
 powershell -ExecutionPolicy Bypass -File deploy.ps1 -Portal <YOUR-XBOX-DEV-MODE-PORTAL> -Phase List
 
 # 4. In Dev Home, flip the package to Game, then launch it from Dev Home.
 ```
 
-The `build-1042.ps1` script is versioned: each release gets its own script
+The `build-1043.ps1` script is versioned: each release gets its own script
 derived from the previous one, with the version number updated in every
 spelling (plain, dotted, and escaped-dot) before running.
 

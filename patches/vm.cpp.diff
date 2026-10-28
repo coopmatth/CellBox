@@ -1,0 +1,82 @@
+diff --git a/rpcs3/Emu/Memory/vm.cpp b/rpcs3/Emu/Memory/vm.cpp
+index ae7e3dd70..0a5806933 100644
+--- a/rpcs3/Emu/Memory/vm.cpp
++++ b/rpcs3/Emu/Memory/vm.cpp
+@@ -837,6 +837,14 @@ namespace vm
+ 		}
+ 		else if (!shm)
+ 		{
++#ifdef _WIN32
++			// Preallocated blocks (m_common) are SEC_RESERVE views on Windows:
++			// commit pages here, on allocation. Commit is shared between the
++			// two views; protection is per-view, so re-apply it to the base
++			// view afterwards (also covers realloc of deallocated ranges).
++			utils::memory_commit(g_sudo_addr + addr, size, utils::protection::rw);
++			utils::memory_commit(g_base_addr + addr, size, prot);
++#endif
+ 			utils::memory_protect(g_base_addr + addr, size, prot);
+ 
+ 			perf_meter<"PAGE_LCK"_u64> perf;
+@@ -1291,6 +1299,15 @@ namespace vm
+ 
+ 			const u32 begina = addr - 4096;
+ 			const u32 enda = addr + size;
++#ifdef _WIN32
++			// Guard pages sit in unallocated (still reserved) SEC_RESERVE pages
++			// on Windows: commit them so the patterns can be written, and keep
++			// the guest-side view guarding (no access).
++			utils::memory_commit(g_sudo_addr + begina, 4096);
++			utils::memory_commit(g_sudo_addr + enda, 4096);
++			utils::memory_protect(g_base_addr + begina, 4096, utils::protection::no);
++			utils::memory_protect(g_base_addr + enda, 4096, utils::protection::no);
++#endif
+ 			fill64(g_sudo_addr + begina, "STACKGRD"_u64, 4096 / sizeof(u64));
+ 			fill64(g_sudo_addr + enda, "UNDERFLO"_u64, 4096 / sizeof(u64));
+ 		}
+@@ -1364,7 +1381,16 @@ namespace vm
+ 			};
+ 
+ 			// Special path for whole-allocated areas allowing 4k granularity
++#ifdef _WIN32
++			// SEC_RESERVE (shm flag 4): views start MEM_RESERVE and pages are
++			// committed on allocation (_page_map), so untouched guest memory
++			// charges no commit. A sparse-file section maps MEM_COMMIT views,
++			// which fixed-commit systems (Xbox Game partition, 5 GiB ceiling)
++			// refuse for whole 256 MiB blocks despite low actual usage.
++			m_common = std::make_shared<utils::shm>(size, 4);
++#else
+ 			m_common = std::make_shared<utils::shm>(size, fmt::format("_block_x%08x", addr));
++#endif
+ 
+ 			if (!map_critical(vm::_ptr<u8>(addr), this->flags & block_size_4k && utils::get_page_size() > 4096 ? utils::protection::rw : utils::protection::no) || !map_critical(vm::get_super_ptr(addr), utils::protection::rw))
+ 			{
+@@ -1880,7 +1906,12 @@ namespace vm
+ 	{
+ 		if (flags & preallocated)
+ 		{
+-			m_common = std::make_shared<utils::shm>(size, fmt::format("_block_x%08x", addr));
++			m_common = std::make_shared<utils::shm>(size,
++#ifdef _WIN32
++				4); // SEC_RESERVE, see block_t constructor
++#else
++				fmt::format("_block_x%08x", addr));
++#endif
+ 			m_common->map_critical(vm::base(addr), this->flags & block_size_4k && utils::get_page_size() > 4096 ? utils::protection::rw : utils::protection::no);
+ 			m_common->map_critical(vm::get_super_ptr(addr));
+ 		}
+@@ -2306,7 +2337,15 @@ namespace vm
+ 
+ 	inline namespace ps3_
+ 	{
++#ifdef _WIN32
++		// SEC_RESERVE (shm flag 4): the 32 GiB copy-on-write view mapped in
++		// init() must not charge commit up front (fixed-commit systems such
++		// as the Xbox Game partition cannot back it). SEC_RESERVE only
++		// applies to pagefile-backed sections, so use the flags ctor.
++		static utils::shm s_hook{0x800000000, 4};
++#else
+ 		static utils::shm s_hook{0x800000000, ""};
++#endif
+ 
+ 		void init()
+ 		{

@@ -1,0 +1,20 @@
+diff --git a/rpcs3/Emu/RSX/NV47/HW/nv4097.cpp b/rpcs3/Emu/RSX/NV47/HW/nv4097.cpp
+index 17ba5ca19..7358d0d62 100644
+--- a/rpcs3/Emu/RSX/NV47/HW/nv4097.cpp
++++ b/rpcs3/Emu/RSX/NV47/HW/nv4097.cpp
+@@ -838,6 +838,15 @@ namespace rsx
+ 			}
+ 
+ 			const u32 val = (arg & 0xff00ff00) | ((arg & 0xff) << 16) | ((arg >> 16) & 0xff);
++
++		// Xbox 1.0.39 diagnostic (read-only): log the back-end release arg AND
++		// transformed val for the stalled label only, so the BE -> ACQ sequence
++		// can be compared (arg 0 legitimately transforms to val 0; do NOT patch).
++		if (addr == 0x50300F40)
++		{
++			rsx_log.error("XBOX-SEMA-BE seq=%llu addr=0x%08X off=0x%08X ctx=0x%08X arg=0x%08X val=0x%08X",
++				rsx::util::xbox_sema_seq_next(), addr, offset, REGS(ctx)->semaphore_context_dma_4097(), arg, val);
++		}
+ 			util::write_gcm_label<true, true>(ctx, reg, addr, val);
+ 		}
+ 

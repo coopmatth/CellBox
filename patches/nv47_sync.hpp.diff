@@ -1,0 +1,44 @@
+diff --git a/rpcs3/Emu/RSX/NV47/HW/nv47_sync.hpp b/rpcs3/Emu/RSX/NV47/HW/nv47_sync.hpp
+index 9e7a90c9a..b05d90600 100644
+--- a/rpcs3/Emu/RSX/NV47/HW/nv47_sync.hpp
++++ b/rpcs3/Emu/RSX/NV47/HW/nv47_sync.hpp
+@@ -3,6 +3,7 @@
+ #include "util/types.hpp"
+ #include "Emu/RSX/RSXThread.h"
+ #include "Emu/RSX/Host/MM.h"
++#include <atomic>
+ 
+ #include "context_accessors.define.h"
+ 
+@@ -10,12 +11,31 @@ namespace rsx
+ {
+ 	namespace util
+ 	{
++		// Xbox 1.0.42: shared monotonic sequence counter for the semaphore
++		// event stream (BE/RELEASE/ACQ/TIMEOUT). Inline function => one
++		// counter across all TUs including this header; function-local
++		// static atomic => thread-safe.
++		inline u64 xbox_sema_seq_next()
++		{
++			static std::atomic<u64> seq{0};
++			return seq.fetch_add(1, std::memory_order_relaxed) + 1;
++		}
++
+ 		template <bool FlushDMA, bool FlushPipe>
+ 		static void write_gcm_label(context* ctx, u32 type, u32 address, u32 data)
+ 		{
+ 			// Ensure atomic seq-cst memory ordering for FIFO GET updates
+ 			atomic_fence_seq_cst();
+ 
++			// Xbox 1.0.38 diagnostic (read-only): log releases to the semaphore
++			// address the game stalls on, so the console run proves the producer.
++			if (address == 0x50300F40)
++			{
++				const u32 prev = static_cast<u32>(vm::_ref<RsxSemaphore>(address));
++				rsx_log.error("XBOX-SEMA-RELEASE seq=%llu type=0x%X addr=0x%08X prev=0x%08X data=0x%08X label_base=0x%08X",
++					xbox_sema_seq_next(), type, address, prev, data, RSX(ctx)->label_addr);
++			}
++
+ 			const bool is_flip_sema = (address == (RSX(ctx)->label_addr + 0x10) || address == (RSX(ctx)->device_addr + 0x30));
+ 			if (!is_flip_sema)
+ 			{

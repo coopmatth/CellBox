@@ -1,0 +1,20 @@
+diff --git a/rpcs3/Emu/Cell/Modules/cellMsgDialog.cpp b/rpcs3/Emu/Cell/Modules/cellMsgDialog.cpp
+index 0c023471e..56f0f2948 100644
+--- a/rpcs3/Emu/Cell/Modules/cellMsgDialog.cpp
++++ b/rpcs3/Emu/Cell/Modules/cellMsgDialog.cpp
+@@ -376,6 +376,7 @@ error_code open_exit_dialog(const std::string& message, bool is_exit_requested,
+ error_code cellMsgDialogOpen2(u32 type, vm::cptr<char> msgString, vm::ptr<CellMsgDialogCallback> callback, vm::ptr<void> userData, vm::ptr<void> extParam)
+ {
+ 	cellSysutil.warning("cellMsgDialogOpen2(type=0x%x, msgString=%s, callback=*0x%x, userData=*0x%x, extParam=*0x%x)", type, msgString, callback, userData, extParam);
++	cellSysutil.error("[MSG-DIALOG] type=0x%x msg=%s", type, msgString);
+ 
+ 	if (!msgString || std::strlen(msgString.get_ptr()) >= CELL_MSGDIALOG_STRING_SIZE || type & -0x33f8)
+ 	{
+@@ -438,6 +439,7 @@ error_code cellMsgDialogOpen(u32 type, vm::cptr<char> msgString, vm::ptr<CellMsg
+ error_code cellMsgDialogOpenErrorCode(u32 errorCode, vm::ptr<CellMsgDialogCallback> callback, vm::ptr<void> userData, vm::ptr<void> extParam)
+ {
+ 	cellSysutil.warning("cellMsgDialogOpenErrorCode(errorCode=0x%x, callback=*0x%x, userData=*0x%x, extParam=*0x%x)", errorCode, callback, userData, extParam);
++	cellSysutil.error("[MSG-DIALOG] error_code=0x%x", errorCode);
+ 
+ 	localized_string_id string_id = localized_string_id::INVALID;
+ 

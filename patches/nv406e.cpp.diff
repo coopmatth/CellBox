@@ -1,0 +1,30 @@
+diff --git a/rpcs3/Emu/RSX/NV47/HW/nv406e.cpp b/rpcs3/Emu/RSX/NV47/HW/nv406e.cpp
+index 705c22b95..e6ffe5f9a 100644
+--- a/rpcs3/Emu/RSX/NV47/HW/nv406e.cpp
++++ b/rpcs3/Emu/RSX/NV47/HW/nv406e.cpp
+@@ -38,6 +38,16 @@ namespace rsx
+ 			RSX(ctx)->last_sema_cmd = RSX(ctx)->fifo_ctrl->get_pos() - 4;
+ 			RSX(ctx)->last_sema_addr = addr;
+ 
++		// Xbox 1.0.39 diagnostic (read-only, target address ONLY — an unfiltered
++		// acquire log would flood the core log): log every acquire attempt for
++		// the stalled label, including successes, so the BE -> ACQ sequence is
++		// visible, not just timeouts.
++		if (addr == 0x50300F40)
++		{
++			rsx_log.error("XBOX-SEMA-ACQ seq=%llu addr=0x%08X off=0x%08X ctx=0x%08X cur=0x%08X want=0x%08X label=0x%08X device=0x%08X",
++				rsx::util::xbox_sema_seq_next(), addr, REGS(ctx)->semaphore_offset_406e(), REGS(ctx)->semaphore_context_dma_406e(), static_cast<u32>(sema), arg, RSX(ctx)->label_addr, RSX(ctx)->device_addr);
++		}
++
+ 			if (sema == arg)
+ 			{
+ 				// Flip semaphore doesnt need wake-up delay
+@@ -82,7 +92,7 @@ namespace rsx
+ 					if ((current - start) > tdr)
+ 					{
+ 						// If longer than driver timeout force exit
+-						rsx_log.error("nv406e::semaphore_acquire has timed out. semaphore_address=0x%X", addr);
++						rsx_log.error("XBOX-SEMA-TIMEOUT seq=%llu addr=0x%08X off=0x%08X ctx=0x%08X cur=0x%08X want=0x%08X label=0x%08X", rsx::util::xbox_sema_seq_next(), addr, REGS(ctx)->semaphore_offset_406e(), REGS(ctx)->semaphore_context_dma_406e(), static_cast<u32>(sema), arg, RSX(ctx)->label_addr);
+ 						break;
+ 					}
+ 				}
