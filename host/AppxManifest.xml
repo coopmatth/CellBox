@@ -1,0 +1,49 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap mp rescap">
+
+  <Identity Name="RPCS3XboxUwpHost" Publisher="CN=RPCS3SpikeDev" Version="1.0.19.0" ProcessorArchitecture="x64" />
+
+  <mp:PhoneIdentity PhoneProductId="c8b2d3e4-5f6a-4b7c-9d8e-0f1a2b3c4d5e" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
+
+  <Properties>
+    <DisplayName>RPCS3 Xbox UWP Host</DisplayName>
+    <PublisherDisplayName>RPCS3SpikeDev</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Universal" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+    <TargetDeviceFamily Name="Windows.Xbox" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-US"/>
+  </Resources>
+
+  <Applications>
+    <Application Id="App" Executable="$targetnametoken$.exe" EntryPoint="XboxUwpHost.App">
+      <uap:VisualElements
+        DisplayName="RPCS3 Xbox UWP Host"
+        Description="RPCS3 Xbox Integration UWP host: D3D12 backend prototype (Steps 3-8 probes kept as regressions)"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png"
+        BackgroundColor="transparent">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+        <uap:SplashScreen Image="Assets\SplashScreen.png" />
+      </uap:VisualElements>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <uap:Capability Name="removableStorage"/>
+    <rescap:Capability Name="broadFileSystemAccess"/>
+  </Capabilities>
+</Package>
+
+
+

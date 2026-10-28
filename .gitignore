@@ -1,0 +1,33 @@
+# Build outputs — never commit binaries or packages
+out/
+*.obj
+*.lib
+*.exe
+*.dll
+*.msix
+*.msixbundle
+*.appxbundle
+*.map
+*.pfx
+*.cer
+*.pdb
+*.exp
+*.ilk
+
+# Device Portal session material — never commit
+wdp-cookies.txt
+host-results-device.txt
+
+# App-local runtime files and user-supplied content — never commit
+LocalState/
+*.iso
+*.PUP
+*.pup
+dev_flash/
+*.log
+
+# Editor / OS noise
+.vs/
+*.user
+.DS_Store
+Thumbs.db

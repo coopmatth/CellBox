@@ -1,0 +1,46 @@
+# Series S starting tuning profile for RPCS3-on-Xbox
+# These map to RPCS3 config.yml / per-game config concepts.
+# They are starting values to TEST, not proven Series S values.
+# Change one setting at a time, per game, and log FPS + memory.
+
+global:
+  target_device: "Xbox Series S, Dev Mode, packaged as a Game (5 GB cap, NOT App 1 GB cap)"
+  renderer: "D3D12-translated  # TODO: Vulkan is not available on Xbox; this is the open work item"
+  resolution:
+    base: "1280x720"
+    scale_percent: 100
+    scale_threshold: "16x16"
+  aspect_ratio: "16:9"
+  frame_limit: "Auto / 60  # enable if a game crashes at unlocked rates"
+  vsync: true
+  anisotropic_filter: "Automatic"
+
+cpu:
+  ppu_decoder: "LLVM Recompiler  # interpreter is a debug fallback only"
+  spu_decoder: "LLVM Recompiler  # try ASMJIT if a game requires it"
+  spu_threads: "auto, capped by 4 exclusive + 2 shared dev-mode cores"
+  thread_scheduler: "Operating System"
+  spu_loop_detection: true
+
+gpu_tuning_knobs_to_expose_in_xbox_ui:
+  - resolution_scale
+  - frame_limit
+  - vsync
+  - anisotropic_filter
+  - write_color_buffers
+  - strict_rendering_mode
+  - async_shader_compiler
+  - shader_mode  # async / sync, per-game
+
+per_game_override_example:
+  game_id: "EXAMPLE-ONLY"
+  notes: "Copy this block per title. Never let one game's fix become the global default."
+  resolution_scale_percent: 100
+  frame_limit: 30
+  spu_decoder: "LLVM Recompiler"
+
+memory_budget:
+  dev_mode_game_cap_gb: 5
+  rpcs3_minimum_gb: 8
+  rpcs3_recommended_gb: 16
+  implication: "Below minimum even as a Game. Test small titles first; expect OOM on large titles."
