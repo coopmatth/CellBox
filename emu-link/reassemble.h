@@ -10,6 +10,7 @@
 // is skipped (idempotent across launches).
 #pragma once
 #include <cstdint>
+#include <functional>
 #include <string>
 
 namespace reassemble {
@@ -20,5 +21,29 @@ namespace reassemble {
 bool reassemble(const std::string& dir, const std::string& base, int parts,
                 const std::string& out_name, uint64_t expected_total,
                 uint64_t& out_bytes, std::string& fail);
+
+// 1.1.5: streamed SHA-256 of a file (self-contained, no bcrypt). hex is
+// upper-case, 64 chars. Returns false if the file cannot be read.
+bool sha256_file(const std::string& path, std::string& hex_upper, uint64_t& bytes);
+
+struct PartsDeleteResult {
+    bool attempted = false;   // ISO was hashed (>=1 part present)
+    bool verified = false;    // ISO size AND sha256 matched
+    int parts_present = 0;
+    int deleted = 0;
+    int failed = 0;
+    uint64_t bytes_deleted = 0;
+    std::string detail;
+};
+
+// Delete exactly <base>.part0..<parts-1> in dir, but ONLY if <out_name> in
+// dir exists at expected_total bytes AND its SHA-256 equals
+// expected_sha256_hex (case-insensitive). Anything else keeps every part.
+// Skips (no hashing) when no part file exists. log receives one line per
+// step (REASSEMBLE-PARTS ...).
+PartsDeleteResult verify_and_delete_parts(const std::string& dir, const std::string& base, int parts,
+                                          const std::string& out_name, uint64_t expected_total,
+                                          const std::string& expected_sha256_hex,
+                                          const std::function<void(const std::string&)>& log);
 
 } // namespace reassemble

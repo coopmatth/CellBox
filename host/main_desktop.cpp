@@ -34,6 +34,40 @@ int main(int argc, char** argv) {
     if (argc > 1) { std::string a = argv[1]; dir = std::wstring(a.begin(), a.end()); }
     unsigned long long targetFrames = 240;
     if (argc > 2) targetFrames = strtoull(argv[2], nullptr, 10);
+    // --- 1.1.5: SHA-256 + verified part auto-delete self-test (pre-test gate) ---
+    {
+        char tmpb[MAX_PATH] = {0}; GetTempPathA(MAX_PATH, tmpb);
+        const std::string td = std::string(tmpb) + "cb115_" + std::to_string(GetCurrentProcessId());
+        CreateDirectoryA(td.c_str(), nullptr);
+        auto P = [&](const char* n) { return td + "\\" + n; };
+        auto W = [&](const char* n, const char* d, size_t len) { FILE* f = nullptr; fopen_s(&f, P(n).c_str(), "wb"); if (f) { fwrite(d, 1, len, f); fclose(f); } };
+        auto E = [&](const char* n) { return GetFileAttributesA(P(n).c_str()) != INVALID_FILE_ATTRIBUTES; };
+        const char* kAbc = "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD";
+        W("t.iso.part0", "ab", 2); W("t.iso.part1", "c", 1);
+        uint64_t ob = 0; std::string rf;
+        bool r1 = reassemble::reassemble(td, "t.iso", 2, "t.iso.out", 3, ob, rf);
+        std::string hex; uint64_t nb = 0;
+        bool r2 = reassemble::sha256_file(P("t.iso.out"), hex, nb);
+        bool shaOk = r1 && r2 && hex == kAbc && nb == 3;
+        auto nolog = [](const std::string&) {};
+        auto bad = reassemble::verify_and_delete_parts(td, "t.iso", 2, "t.iso.out", 3, std::string(64, '0'), nolog);
+        bool keepOk = bad.attempted && !bad.verified && bad.deleted == 0 && E("t.iso.part0") && E("t.iso.part1");
+        auto wrongSize = reassemble::verify_and_delete_parts(td, "t.iso", 2, "t.iso.out", 4, kAbc, nolog);
+        bool sizeOk = !wrongSize.attempted && !wrongSize.verified && wrongSize.deleted == 0 && E("t.iso.part0");
+        auto good = reassemble::verify_and_delete_parts(td, "t.iso", 2, "t.iso.out", 3, kAbc, nolog);
+        bool delOk = good.verified && good.deleted == 2 && good.failed == 0 && !E("t.iso.part0") && !E("t.iso.part1") && E("t.iso.out");
+        auto none = reassemble::verify_and_delete_parts(td, "t.iso", 2, "t.iso.out", 3, kAbc, nolog);
+        bool noneOk = !none.attempted && none.parts_present == 0;
+        uint64_t ob2 = 0; std::string rf2;
+        bool r3 = reassemble::reassemble(td, "nope.iso", 2, "nope.out", 3, ob2, rf2);
+        bool noZeroIso = !r3 && !E("nope.out");
+        DeleteFileA(P("t.iso.out").c_str()); DeleteFileA(P("t.iso.part0").c_str()); DeleteFileA(P("t.iso.part1").c_str());
+        RemoveDirectoryA(td.c_str());
+        bool all = shaOk && keepOk && sizeOk && delOk && noneOk && noZeroIso;
+        printf("REASSEMBLE-SHA-PC: %s sha-abc=%d keep-on-bad-hash=%d keep-on-bad-size=%d delete-on-verified=%d skip-when-no-parts=%d no-zero-byte-iso=%d\n",
+               all ? "PASS" : "FAIL", (int)shaOk, (int)keepOk, (int)sizeOk, (int)delOk, (int)noneOk, (int)noZeroIso);
+        if (!all) { printf("DESKTOP-PRETEST: FAIL (1.1.5 sha256/parts-delete self-test)\n"); return 1; }
+    }
     HRESULT ehr = D3D12EnableExperimentalFeatures(1, &D3D12ExperimentalShaderModels, nullptr, nullptr); (void)ehr;
     printf("D3D12EnableExperimentalFeatures(ShaderModels) hr=0x%08lX\n", (unsigned long)ehr);
     ComPtr<ID3D12Device> dev;

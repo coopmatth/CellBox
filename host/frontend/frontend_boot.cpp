@@ -38,7 +38,10 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
+#include <functional>
+#include <map>
 #include <thread>
 
 #include <windows.h>
@@ -73,6 +76,68 @@ std::string slash_path(const std::string& p)
     std::string s = p;
     std::replace(s.begin(), s.end(), '\\', '/');
     return s;
+}
+
+// 1.1.5 BOOT-GAMES-YML: the core's update path (System.cpp Load, GD
+// recursion, lines 2163-2181) re-resolves /dev_bdvd ONLY through
+// games.yml (m_games_config.get_path(title_id)); with no entry it falls
+// to "Failed to mount disc directory" and BootGame returns code 4
+// (invalid_file_or_folder). The host never wrote an entry, so register the
+// ISO with the core's own public API (Emulator::AddGameToYml -> reads
+// PARAM.SFO from the ISO, saves games.yml under fs::get_config_dir(true),
+// i.e. LocalState/config/games.yml) before every ISO boot.
+const char* games_yml_result_name(game_boot_result r)
+{
+    switch (r)
+    {
+    case game_boot_result::no_errors: return "no_errors(added)";
+    case game_boot_result::already_added: return "already_added";
+    case game_boot_result::generic_error: return "generic_error";
+    case game_boot_result::invalid_file_or_folder: return "invalid_file_or_folder";
+    default: return "other";
+    }
+}
+
+void register_iso_in_games_yml(const std::string& iso_path, const std::function<void(const std::string&)>& log)
+{
+    std::string lower = iso_path;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    const bool looks_iso = lower.size() > 4 && lower.compare(lower.size() - 4, 4, ".iso") == 0;
+    if (!looks_iso || fs::is_dir(iso_path))
+    {
+        log("BOOT-GAMES-YML registered=0 path=" + iso_path + " reason=target-is-not-an-iso-file (folder/EBOOT boots do not need an entry)");
+        return;
+    }
+    game_boot_result r = game_boot_result::generic_error;
+    try
+    {
+        r = Emu.AddGameToYml(iso_path, true);
+    }
+    catch (const std::exception& ex)
+    {
+        log("BOOT-GAMES-YML registered=0 path=" + iso_path + " exception=" + ex.what() + " (boot continues)");
+        return;
+    }
+    catch (...)
+    {
+        log("BOOT-GAMES-YML registered=0 path=" + iso_path + " exception=unknown (boot continues)");
+        return;
+    }
+    std::string title_id;
+    const std::map<std::string, std::string> games = Emu.GetGamesConfig().get_games();
+    for (const auto& kv : games)
+    {
+        if (kv.second == iso_path) { title_id = kv.first; break; }
+    }
+    const bool registered = !title_id.empty() &&
+        (r == game_boot_result::no_errors || r == game_boot_result::already_added);
+    log(std::string("BOOT-GAMES-YML registered=") + (registered ? "1" : "0") +
+        " path=" + iso_path +
+        " title_id=" + (title_id.empty() ? std::string("(none)") : title_id) +
+        " result=" + games_yml_result_name(r) +
+        " entries=" + std::to_string(games.size()) +
+        " games_yml=" + fs::get_config_dir(true) + "games.yml" +
+        (registered ? "" : " (boot continues; update recursion may fail with code 4)"));
 }
 
 const char* boot_result_name(int code)
@@ -561,6 +626,7 @@ boot_outcome boot_phase_for_path(const std::string& localStateUtf8,
     // BootGame so D3D12GSRender::on_init_thread can load
     // d3d12_shader_cache.bin during Load.
     d3d12_rsx_set_cache_dir(cfg);
+    register_iso_in_games_yml(iso_path, log); // 1.1.5: before EVERY ISO boot
     game_boot_result result = game_boot_result::generic_error;
     bool seh_ok = false;
     bool running_after_call = false;

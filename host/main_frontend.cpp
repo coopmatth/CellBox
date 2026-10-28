@@ -134,7 +134,7 @@ public:
         xbox_cb_set_main_thread(GetCurrentThreadId());
         xbox_cb_set_logger([](const std::string& s) { log_line("%s", s.c_str()); });
         const unsigned long long limit = Windows::System::MemoryManager::AppMemoryUsageLimit;
-        log_line("CellBox frontend 1.1.3 (F1 library + F4 compile/pre-bake + F2 delete + boot-target/mount logging + USB source + notice/trace progress; D3D12 UI, NOT XAML)");
+        log_line("CellBox frontend 1.1.5 (F1 library + F4 compile/pre-bake + F2 delete + boot-target/mount logging + USB source + notice/trace progress; D3D12 UI, NOT XAML)");
         log_line("AppMemoryUsageLimit=%llu bytes (%.2f GiB) ModeGuess=%s", limit, limit / 1073741824.0,
             limit > (unsigned long long(3) << 30) ? "GAME" : "APP");
         {
@@ -286,6 +286,21 @@ void App::run_frontend() {
             log_line("REASSEMBLE-VERDICT: PASS (full ISO present in LocalState)");
         else
             log_line("REASSEMBLE-VERDICT: SKIPPED (parts not all present yet)");
+    }
+    // 1.1.5 REASSEMBLE-PARTS: free the 4.6 GB the parts occupy, but ONLY
+    // after the assembled ISO is proven (exact size AND SHA-256). Deletes
+    // exactly bo3.iso.part0..3 in LocalState and nothing else. Mismatch,
+    // missing ISO, or any doubt => parts are kept. Runs only when at least
+    // one part file exists (no hashing cost on later launches).
+    if (!lsdir.empty()) {
+        auto plog = [](const std::string& m) { log_line("%s", m.c_str()); };
+        reassemble::PartsDeleteResult pr = reassemble::verify_and_delete_parts(
+            lsdir, frontend::kStagingPartBase, frontend::kStagingPartCount,
+            frontend::kStagingIsoName, frontend::kStagingIsoBytes,
+            frontend::kStagingIsoSha256, plog);
+        log_line("REASSEMBLE-PARTS-RESULT: attempted=%d verified=%d parts_present=%d deleted=%d failed=%d bytes_freed=%llu detail=%s",
+            pr.attempted ? 1 : 0, pr.verified ? 1 : 0, pr.parts_present, pr.deleted, pr.failed,
+            (unsigned long long)pr.bytes_deleted, pr.detail.c_str());
     }
     // EMU-INIT + FIRMWARE + RSX bridge (1044 order and machinery).
     watchdog_start(lsdir);

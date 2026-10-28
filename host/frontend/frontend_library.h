@@ -70,6 +70,11 @@ inline constexpr const char kStagingPartBase[] = "bo3.iso";
 inline constexpr int kStagingPartCount = 4;
 inline constexpr const char kStagingIsoName[] = "Call of Duty - Black Ops III.iso";
 inline constexpr std::uint64_t kStagingIsoBytes = 4599644160ull;
+// 1.1.5: SHA-256 of the full ISO (== concatenation of the four parts),
+// computed on the PC from the staged parts. The staging block deletes the
+// parts only after the assembled ISO matches this and kStagingIsoBytes.
+inline constexpr const char kStagingIsoSha256[] =
+    "67CC16FBB7ECDAA329F5DCCB8DBA4587134F4E1EB782381997213165FE89CE9C";
 
 struct DeleteResult
 {

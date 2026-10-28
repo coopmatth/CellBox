@@ -277,6 +277,13 @@ void pad_thread::Init()
             CELL_PAD_CAPABILITY_PS3_CONFORMITY | CELL_PAD_CAPABILITY_PRESS_MODE | CELL_PAD_CAPABILITY_ACTUATOR,
             CELL_PAD_DEV_TYPE_STANDARD);
         m_pads[i]->m_class_type = CELL_PAD_PCLASS_TYPE_STANDARD;
+        // 1.1.5: nonzero vendor/product IDs (Sony DualShock 3 0x054C/0x0268)
+        // so cellPad.cpp:235-239 does NOT take the "fallback to defaults"
+        // branch, whose ::at32(input::get_products_by_class(class), 0) is a
+        // fatal range-check on the empty product list in this host (no Qt
+        // input_products registry). All 7 ports, connected or not.
+        m_pads[i]->m_vendor_id = 0x054C;
+        m_pads[i]->m_product_id = 0x0268;
         m_pads_connected[i] = (i == 0);
     }
     {
