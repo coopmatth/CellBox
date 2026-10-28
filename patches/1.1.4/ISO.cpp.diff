@@ -1,0 +1,51 @@
+diff --git a/rpcs3/Loader/ISO.cpp b/rpcs3/Loader/ISO.cpp
+--- a/rpcs3/Loader/ISO.cpp
++++ b/rpcs3/Loader/ISO.cpp
+@@ -1417,15 +1417,44 @@
+ 		}
+ 		else
+ 		{
++			// 1.1.4: PS3 titles (BO3 among them) ask for names in a different case
++			// than the disc image stores. Exact match first, then ASCII
++			// case-insensitive (the real PS3 filesystem is case-insensitive here).
++			const auto ascii_ieq = [](std::string_view a, std::string_view b)
++			{
++				if (a.size() != b.size())
++					return false;
++				for (usz i = 0; i < a.size(); i++)
++				{
++					char ca = a[i], cb = b[i];
++					if (ca >= 'A' && ca <= 'Z') ca = static_cast<char>(ca - 'A' + 'a');
++					if (cb >= 'A' && cb <= 'Z') cb = static_cast<char>(cb - 'A' + 'a');
++					if (ca != cb)
++						return false;
++				}
++				return true;
++			};
++
++			const iso_fs_node* ci_match = nullptr;
++
+ 			for (const auto& entry : top_entry->children)
+ 			{
+ 				if (entry->metadata.name == path_component)
+ 				{
+-					search_stack.push(entry.get());
+-
+-					found = true;
++					ci_match = entry.get();
+ 					break;
+ 				}
++
++				if (!ci_match && ascii_ieq(entry->metadata.name, path_component))
++				{
++					ci_match = entry.get();
++				}
++			}
++
++			if (ci_match)
++			{
++				search_stack.push(const_cast<iso_fs_node*>(ci_match));
++				found = true;
+ 			}
+ 		}
+ 

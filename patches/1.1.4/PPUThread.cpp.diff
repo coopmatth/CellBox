@@ -1,0 +1,21 @@
+diff --git a/rpcs3/Emu/Cell/PPUThread.cpp b/rpcs3/Emu/Cell/PPUThread.cpp
+--- a/rpcs3/Emu/Cell/PPUThread.cpp
++++ b/rpcs3/Emu/Cell/PPUThread.cpp
+@@ -6257,12 +6257,14 @@
+ 			e.name = thread.get_name();
+ 		}
+ 	});
+-	std::string out = fmt::format("total={} run={} wait={} paused={} stop={} threads=[",
++	// 1.1.4: RPCS3's fmt::format is printf-style (%u/%s), NOT std::format-style;
++	// the previous "{}" placeholders were printed blank in BOOT-PPU-SUMMARY.
++	std::string out = fmt::format("total=%u run=%u wait=%u paused=%u stop=%u threads=[",
+ 		total, run, wait, paused, stop);
+ 	for (unsigned i = 0; i < listed; ++i)
+-		out += fmt::format("id=0x{:X} {} cia=0x{:X} {}; ", list[i].id, list[i].name, list[i].cia, list[i].st);
++		out += fmt::format("id=0x%X %s cia=0x%X %s; ", list[i].id, list[i].name, list[i].cia, list[i].st);
+ 	if (total > listed)
+-		out += fmt::format("+{} more; ", total - listed);
++		out += fmt::format("+%u more; ", total - listed);
+ 	out += "]";
+ 	const usz n = std::min<usz>(out.size(), len - 1);
+ 	std::memcpy(buf, out.c_str(), n);

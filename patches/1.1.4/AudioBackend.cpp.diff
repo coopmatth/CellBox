@@ -1,0 +1,21 @@
+diff --git a/rpcs3/Emu/Audio/AudioBackend.cpp b/rpcs3/Emu/Audio/AudioBackend.cpp
+--- a/rpcs3/Emu/Audio/AudioBackend.cpp
++++ b/rpcs3/Emu/Audio/AudioBackend.cpp
+@@ -216,12 +216,13 @@
+ 	case audio_channel_layout::surround_5_1: return 6;
+ 	case audio_channel_layout::surround_7_1: return 8;
+ 	default:
+-		// 1.0.43 (v): the audio thread dies on this throw (captured as a fatal
+-		// by the Xbox crash listener); log the layout value + the consequence
+-		// at error level first so the next run shows WHY it was requested.
++		// 1.0.43 (v): log the layout value at error level so the next run shows
++		// WHY it was requested.
+ 		// NOTE: layout 0 is the unresolved automatic value: the caller passed
+ 		// automatic through instead of resolving it to a concrete layout.
+-		xbox_audio.error("[XBOX-AUDIO-LAYOUT] default_layout_channel_count unsupported layout=%u (no return; caller thread terminates)", static_cast<u32>(layout));
++		// 1.1.4: message text corrected - this path does NOT terminate the
++		// thread any more; it returns stereo (2 channels), see below.
++		xbox_audio.error("[XBOX-AUDIO-LAYOUT] default_layout_channel_count unsupported layout=%u (falling back to stereo, 2 channels)", static_cast<u32>(layout));
+ 		return 2; // [XBOX-AUDIO-LAYOUT] Fallback to stereo instead of crashing the audio thread
+ 	}
+ }

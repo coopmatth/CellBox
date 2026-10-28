@@ -1,0 +1,20 @@
+diff --git a/rpcs3/Emu/RSX/NV47/HW/nv406e.cpp b/rpcs3/Emu/RSX/NV47/HW/nv406e.cpp
+--- a/rpcs3/Emu/RSX/NV47/HW/nv406e.cpp
++++ b/rpcs3/Emu/RSX/NV47/HW/nv406e.cpp
+@@ -93,6 +93,16 @@
+ 					{
+ 						// If longer than driver timeout force exit
+ 						rsx_log.error("XBOX-SEMA-TIMEOUT seq=%llu addr=0x%08X off=0x%08X ctx=0x%08X cur=0x%08X want=0x%08X label=0x%08X", rsx::util::xbox_sema_seq_next(), addr, REGS(ctx)->semaphore_offset_406e(), REGS(ctx)->semaphore_context_dma_406e(), static_cast<u32>(sema), arg, RSX(ctx)->label_addr);
++
++						// 1.1.4: force-complete the GCM label the FIFO is stalled on so the
++						// guest (which also polls this label from the PPU) does not hang
++						// forever behind a release the host never produced. Never done for
++						// the flip semaphore (label_addr + 0x10), which the flip path owns.
++						if (addr != RSX(ctx)->label_addr + 0x10 && (RSX(ctx)->label_addr >> 28) == (addr >> 28))
++						{
++							vm::write<atomic_t<RsxSemaphore>>(addr, arg);
++							rsx_log.error("XBOX-SEMA-FORCE addr=0x%08X value=0x%08X (label written after acquire timeout)", addr, arg);
++						}
+ 						break;
+ 					}
+ 				}

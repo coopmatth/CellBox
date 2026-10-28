@@ -370,6 +370,58 @@ void log_addrspace_probe(std::function<void(const std::string&)> log)
     CloseHandle(hmap);
 }
 
+// 1.1.4: one-shot directory listing through the guest VFS so the log shows
+// which fast-files/xpaks are really visible to the game (disc image vs the
+// installed title update). Names are batched into few log lines. Read-only.
+void log_vfs_listing(const std::function<void(const std::string&)>& log, const std::string& vpath)
+{
+    try
+    {
+        const std::string host = vfs::get(vpath);
+        if (host.empty())
+        {
+            log("BOOT-LISTING " + vpath + " : NOT MOUNTED");
+            return;
+        }
+        fs::dir d(host);
+        if (!d)
+        {
+            log("BOOT-LISTING " + vpath + " : MISSING (cannot open directory)");
+            return;
+        }
+        std::string line;
+        unsigned count = 0, files = 0, dirs = 0, lines = 0;
+        unsigned long long bytes = 0;
+        for (const auto& e : d)
+        {
+            if (e.name == "." || e.name == "..")
+                continue;
+            ++count;
+            if (e.is_directory) ++dirs; else { ++files; bytes += e.size; }
+            line += e.name;
+            line += e.is_directory ? "/ " : "(" + std::to_string(e.size) + ") ";
+            if (line.size() > 700)
+            {
+                if (lines < 80) log("BOOT-LISTING " + vpath + " : " + line);
+                ++lines;
+                line.clear();
+            }
+        }
+        if (!line.empty() && lines < 80)
+            log("BOOT-LISTING " + vpath + " : " + line);
+        log("BOOT-LISTING " + vpath + " : total_entries=" + std::to_string(count) + " files=" + std::to_string(files) +
+            " dirs=" + std::to_string(dirs) + " bytes=" + std::to_string(bytes));
+    }
+    catch (const std::exception& ex)
+    {
+        log("BOOT-LISTING " + vpath + " : EXCEPTION " + ex.what());
+    }
+    catch (...)
+    {
+        log("BOOT-LISTING " + vpath + " : EXCEPTION unknown");
+    }
+}
+
 } // namespace
 
 boot_outcome boot_phase(const std::string& localStateUtf8,
@@ -549,6 +601,9 @@ boot_outcome boot_phase(const std::string& localStateUtf8,
             " AppMemoryUsageLimit=" + std::to_string(cb.mem_limit()) + " (3.0 GiB abort line=3221225472) milestone=boot-returned");
     if (result == game_boot_result::no_errors)
     {
+        // 1.1.4: one-shot listing of the two game data roots (see log_vfs_listing).
+        log_vfs_listing(log, "/dev_bdvd/PS3_GAME/USRDIR/zone");
+        log_vfs_listing(log, "/dev_hdd0/game/BLUS31527/USRDIR");
         // 1.0.30 wording fix: BootGame only calls Load(); Run() sets
         // state=starting and state=running arrives later via the RSX
         // thread's RunPPU() -> FinalizeRunRequest(). Do NOT claim

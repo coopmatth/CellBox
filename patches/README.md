@@ -48,3 +48,26 @@ minus SDL3-static. Generate it from your core build with
 `libs4.rsp`); the response file itself is a build artifact and is not
 stored here. The prebuilt `emucore.lib` is likewise a build output, not a
 repo file.
+
+## 1.1.4 incremental patches (`patches/1.1.4/`)
+
+These four diffs apply **on top of** the nine diffs above (they are deltas
+against the 1.1.3 patched core, not against upstream):
+
+```sh
+git apply patches/1.1.4/ISO.cpp.diff patches/1.1.4/PPUThread.cpp.diff \
+  patches/1.1.4/AudioBackend.cpp.diff patches/1.1.4/nv406e.cpp.diff
+```
+
+| Diff | Change |
+|---|---|
+| `ISO.cpp.diff` | Disc-image path lookup falls back to an ASCII case-insensitive match after the exact match (BO3 asks for names in a different case than the image stores; the real PS3 filesystem is case-insensitive here). |
+| `PPUThread.cpp.diff` | `BOOT-PPU-SUMMARY` used `{}` placeholders with RPCS3's printf-style `fmt::format`, so every value printed blank; now `%u/%X/%s`. |
+| `AudioBackend.cpp.diff` | `[XBOX-AUDIO-LAYOUT]` message text corrected (the path falls back to stereo; it does not terminate the thread). |
+| `nv406e.cpp.diff` | After the existing `XBOX-SEMA-TIMEOUT` the stalled GCM label is force-written with the awaited value (never the flip semaphore at `label_addr + 0x10`), logged as `XBOX-SEMA-FORCE`. This is a behavioural change, unlike the 1.0.x logging patches. |
+
+Build recipe for 1.1.4: `host/manual-ppu.ps1` (compile `PPUThread.obj`),
+MSBuild `emucore.vcxproj` for the other three objects, then
+`host/lib-surgery-1044.ps1` to swap the four objects into `emucore.lib`
+(the pre-1.1.4 lib is kept as `emucore-1044-pre114.lib`). `host/core-build-1044.ps1`
+is the MSBuild step; it fails on `PPUThread.cpp` (LLVM include) by design, see above.

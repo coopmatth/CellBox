@@ -12,12 +12,22 @@
 // py=720 (bottom) -> -1. 1280x720 matches the scratch/bridge dims.
 // The blit's uv.y = 1-p.y flip is texture sampling, NOT geometry - it is
 // untouched, so there is no double flip. z=0, w=1 (unchanged).
+// 1.1.4: second vertex stream carries the guest diffuse colour (RSX attribute 3,
+// converted to float4 on upload; constant grey when the attribute is not a
+// readable vertex array). It is passed through to the pixel shader.
 struct Vin
 {
     float3 pos : POSITION;
+    float4 col : COLOR;
 };
 
-float4 main(Vin v) : SV_Position
+struct Vout
+{
+    float4 pos : SV_Position;
+    float4 col : COLOR;
+};
+
+Vout main(Vin v)
 {
     float2 xy = v.pos.xy;
     if (abs(xy.x) > 2.0f || abs(xy.y) > 2.0f)
@@ -25,5 +35,8 @@ float4 main(Vin v) : SV_Position
         xy.x = (xy.x / 1280.0f) * 2.0f - 1.0f;
         xy.y = 1.0f - (xy.y / 720.0f) * 2.0f;
     }
-    return float4(xy, 0.0f, 1.0f);
+    Vout o;
+    o.pos = float4(xy, 0.0f, 1.0f);
+    o.col = v.col;
+    return o;
 }

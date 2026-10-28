@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <fstream>
+#include <vector>
 
 #include "Emu/Memory/vm.h"
 #include "Emu/RSX/Core/RSXDrawCommands.h"
@@ -70,9 +71,10 @@ namespace
         list->ResourceBarrier(1, &b);
     }
 
-    // Primitive class -> (D3D12 topology, PSO topology type). Fan, quads,
-    // quad_strip and polygon are approximated as triangle lists (named
-    // Slice 2 limitation: visible but wrong shape).
+    // Primitive class -> (D3D12 topology, PSO topology type). 1.1.4: fan, quads,
+    // quad_strip, polygon (-> TRIANGLELIST) and line_loop (-> LINESTRIP) set
+    // `approx` = true, which now means "needs index expansion" (see
+    // expand_primitive below), no longer "drawn with the wrong shape".
     struct TopoMap
     {
         D3D12_PRIMITIVE_TOPOLOGY topo;
@@ -95,6 +97,55 @@ namespace
         case pt::quad_strip:
         case pt::polygon: return {D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE, true};
         default: return {D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE, true};
+        }
+    }
+
+    // 1.1.4: real triangle/line index expansion for the primitive classes D3D12
+    // has no native topology for. `ids` is the vertex-id sequence the guest
+    // draw would consume (array draw: 0..n-1 relative to the uploaded range;
+    // indexed draw: the guest indices). The result is a list of vertex ids for
+    // D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST (or LINESTRIP for line_loop).
+    //   quads       (a,b,c,d)        -> (a,b,c) (a,c,d)
+    //   quad_strip  v0 v1 v2 v3 ...  -> quad k = (v2k, v2k+1, v2k+3, v2k+2)
+    //   polygon/fan v0 v1 v2 ...     -> (v0, vi, vi+1)
+    //   line_loop   v0 .. vn-1       -> v0 .. vn-1 v0 (line strip)
+    void expand_primitive(rsx::primitive_type p, const std::vector<u32>& ids, std::vector<u32>& out)
+    {
+        using pt = rsx::primitive_type;
+        const size_t n = ids.size();
+        out.clear();
+        switch (p)
+        {
+        case pt::quads:
+            out.reserve(n / 4 * 6);
+            for (size_t i = 0; i + 3 < n; i += 4)
+            {
+                out.push_back(ids[i]);     out.push_back(ids[i + 1]); out.push_back(ids[i + 2]);
+                out.push_back(ids[i]);     out.push_back(ids[i + 2]); out.push_back(ids[i + 3]);
+            }
+            break;
+        case pt::quad_strip:
+            for (size_t i = 0; i + 3 < n; i += 2)
+            {
+                out.push_back(ids[i]);     out.push_back(ids[i + 1]); out.push_back(ids[i + 3]);
+                out.push_back(ids[i]);     out.push_back(ids[i + 3]); out.push_back(ids[i + 2]);
+            }
+            break;
+        case pt::polygon:
+        case pt::triangle_fan:
+            for (size_t i = 1; i + 1 < n; ++i)
+            {
+                out.push_back(ids[0]); out.push_back(ids[i]); out.push_back(ids[i + 1]);
+            }
+            break;
+        case pt::line_loop:
+            out = ids;
+            if (n >= 2)
+                out.push_back(ids[0]);
+            break;
+        default:
+            out = ids; // not an expanded class; caller should not get here
+            break;
         }
     }
 } // namespace
@@ -365,6 +416,8 @@ bool D3D12GSRender::slice_ensure_resources()
     {
         D3D12_INPUT_ELEMENT_DESC layout[] = {
             {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            // 1.1.4: vertex colour (RSX attribute 3 / diffuse) in slot 1, float4.
+            {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
         };
         D3D12_GRAPHICS_PIPELINE_STATE_DESC pso{};
         pso.pRootSignature = m_slice_rs.Get();
@@ -378,7 +431,7 @@ bool D3D12GSRender::slice_ensure_resources()
         pso.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
         pso.DepthStencilState.DepthEnable = FALSE;
         pso.InputLayout.pInputElementDescs = layout;
-        pso.InputLayout.NumElements = 1;
+        pso.InputLayout.NumElements = 2;
         pso.SampleDesc.Count = 1;
         pso.NumRenderTargets = 1;
         pso.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -811,6 +864,153 @@ bool D3D12GSRender::slice_try_real_draw()
         return true;
     };
 
+    // ---- 1.1.4: vertex colour (RSX attribute 3 = diffuse / COLOR0) ----
+    // Resolve which interleaved block carries attribute 3 and how to read it.
+    // Only float / UNORM8 / SNORM16 with >= 3 components are decoded; anything
+    // else (constant register, unsupported type) falls back to constant grey.
+    const rsx::interleaved_range_info* cblk = nullptr;
+    u32 c_in_block = 0, c_stride = 0, c_comps = 0;
+    rsx::vertex_base_type c_type = rsx::vertex_base_type::f;
+    {
+        const auto& arr3 = rsx::method_registers.vertex_arrays_info[3];
+        c_comps = arr3.size();
+        c_type = arr3.type();
+        const bool type_ok = (c_type == rsx::vertex_base_type::f || c_type == rsx::vertex_base_type::ub ||
+                              c_type == rsx::vertex_base_type::s1);
+        if (c_comps >= 3 && c_comps <= 4 && type_ok)
+        {
+            for (const auto* b : layout.interleaved_blocks)
+            {
+                for (const auto& loc : b->locations)
+                    if (loc.index == 3) { cblk = b; break; }
+                if (cblk) break;
+            }
+            if (cblk && !cblk->single_vertex)
+            {
+                const u32 base3 = arr3.offset() & 0x7fffffff;
+                c_stride = cblk->attribute_stride ? cblk->attribute_stride : arr3.stride();
+                if (base3 >= cblk->base_offset && c_stride != 0 && (base3 - cblk->base_offset) < c_stride)
+                    c_in_block = base3 - cblk->base_offset;
+                else
+                    cblk = nullptr;
+            }
+            else
+                cblk = nullptr;
+        }
+    }
+    static bool col_path_logged = false;
+    if (!col_path_logged)
+    {
+        col_path_logged = true;
+        wd("BOOT-SLICE-COLOR path=%s type=%d comps=%u stride=%u in_block=%u\r\n",
+           cblk ? "attr3-vertex-colour" : "constant-grey-fallback", (int)c_type, (unsigned)c_comps,
+           (unsigned)c_stride, (unsigned)c_in_block);
+    }
+
+    // Uploads float4 colours for vertices [first_vertex, first_vertex + count)
+    // (same range as the position upload). Never fails the draw on a colour
+    // problem: unreadable guest memory simply yields the grey fallback.
+    auto upload_col_range = [&](u32 first_vertex, u32 vertex_count, UINT64* out_gpu_off) -> bool
+    {
+        const UINT64 need = static_cast<UINT64>(vertex_count) * 16ull;
+        if (vertex_count == 0 || m_up_cursor + need > (8ull << 20))
+        {
+            slice_note_skip(kSkipOverflow);
+            return false;
+        }
+        float* dst = reinterpret_cast<float*>(m_vtx_cpu + m_up_cursor);
+        bool ok = (cblk != nullptr);
+        const u8* src = nullptr;
+        if (ok)
+        {
+            const u32 guest_bytes = vertex_count * c_stride;
+            const u32 guest_addr = cblk->real_offset_address + c_in_block + first_vertex * c_stride;
+            if (vm::check_addr(guest_addr, vm::page_readable, guest_bytes))
+                src = vm::_ptr<const u8>(guest_addr);
+            else
+                ok = false;
+        }
+        for (u32 v = 0; v < vertex_count; ++v)
+        {
+            float rgba[4] = {0.5f, 0.5f, 0.5f, 1.0f};
+            if (ok)
+            {
+                const u8* p = src + static_cast<size_t>(v) * c_stride;
+                rgba[3] = 1.0f;
+                for (u32 c = 0; c < c_comps; ++c)
+                {
+                    if (c_type == rsx::vertex_base_type::f)
+                    {
+                        u32 bits = 0;
+                        std::memcpy(&bits, p + c * 4, 4);
+                        bits = bswap32(bits);
+                        std::memcpy(&rgba[c], &bits, 4);
+                    }
+                    else if (c_type == rsx::vertex_base_type::s1)
+                    {
+                        u16 bits = 0;
+                        std::memcpy(&bits, p + c * 2, 2);
+                        rgba[c] = static_cast<s16>(bswap16(bits)) / 32767.0f;
+                    }
+                    else // ub (UNORM8), memory order = component order
+                    {
+                        rgba[c] = p[c] / 255.0f;
+                    }
+                }
+            }
+            std::memcpy(dst + v * 4, rgba, sizeof(rgba));
+        }
+        *out_gpu_off = m_vtx_gpu + m_up_cursor;
+        m_up_cursor += need;
+        return true;
+    };
+
+    // Upload positions + colours for the vertex range and bind both vertex
+    // buffers (slot 0 = POSITION float3, slot 1 = COLOR float4).
+    auto bind_vertices = [&](u32 first_vertex, u32 vertex_count) -> bool
+    {
+        UINT64 pos_gpu = 0, col_gpu = 0;
+        if (!upload_pos_range(first_vertex, vertex_count, &pos_gpu))
+            return false;
+        if (!upload_col_range(first_vertex, vertex_count, &col_gpu))
+            return false;
+        D3D12_VERTEX_BUFFER_VIEW vbvs[2]{};
+        vbvs[0].BufferLocation = pos_gpu;
+        vbvs[0].SizeInBytes = vertex_count * 12u;
+        vbvs[0].StrideInBytes = 12;
+        vbvs[1].BufferLocation = col_gpu;
+        vbvs[1].SizeInBytes = vertex_count * 16u;
+        vbvs[1].StrideInBytes = 16;
+        m_slice_list->IASetVertexBuffers(0, 2, vbvs);
+        return true;
+    };
+
+    // Uploads a 32-bit index list into the ring and issues the indexed draw.
+    auto draw_u32_indices = [&](const std::vector<u32>& idx) -> bool
+    {
+        if (idx.empty())
+        {
+            slice_note_skip(kSkipEmptyClause);
+            return false;
+        }
+        const UINT64 bytes = static_cast<UINT64>(idx.size()) * 4ull;
+        const UINT64 off = (m_up_cursor + 3ull) & ~3ull;
+        if (off + bytes > (8ull << 20))
+        {
+            slice_note_skip(kSkipOverflow);
+            return false;
+        }
+        std::memcpy(m_vtx_cpu + off, idx.data(), static_cast<size_t>(bytes));
+        m_up_cursor = off + bytes;
+        D3D12_INDEX_BUFFER_VIEW ibv{};
+        ibv.BufferLocation = m_vtx_gpu + off;
+        ibv.SizeInBytes = static_cast<UINT>(bytes);
+        ibv.Format = DXGI_FORMAT_R32_UINT;
+        m_slice_list->IASetIndexBuffer(&ibv);
+        m_slice_list->DrawIndexedInstanced(static_cast<UINT>(idx.size()), 1, 0, 0, 0);
+        return true;
+    };
+
     const TopoMap topo = map_topo(dc.primitive);
     ID3D12PipelineState* pso = nullptr;
     if (topo.type == D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE)
@@ -865,15 +1065,8 @@ bool D3D12GSRender::slice_try_real_draw()
         }
         // Read + BE->LE swap indices; find max vertex index.
         const u8* raw = reinterpret_cast<const u8*>(span.data());
+        std::vector<u32> gidx(elems);
         u32 max_idx = 0;
-        const UINT64 idx_need = static_cast<UINT64>(elems) * tsize;
-        const UINT64 idx_off = (m_up_cursor + 3ull) & ~3ull;
-        if (idx_off + idx_need > (8ull << 20))
-        {
-            slice_note_skip(kSkipOverflow);
-            return false;
-        }
-        u8* idx_dst = m_vtx_cpu + idx_off;
         for (u32 i = 0; i < elems; ++i)
         {
             u32 v = 0;
@@ -882,39 +1075,65 @@ bool D3D12GSRender::slice_try_real_draw()
                 u16 bits = 0;
                 std::memcpy(&bits, raw + i * 2, 2);
                 v = bswap16(bits);
-                std::memcpy(idx_dst + i * 2, &v, 2);
             }
             else
             {
                 u32 bits = 0;
                 std::memcpy(&bits, raw + i * 4, 4);
                 v = bswap32(bits);
-                std::memcpy(idx_dst + i * 4, &v, 4);
             }
+            gidx[i] = v;
             if (v > max_idx)
                 max_idx = v;
         }
-        m_up_cursor = idx_off + idx_need;
         // Upload vertices [0, max_idx] (indices are absolute).
-        UINT64 vb_off = 0;
-        if (!upload_pos_range(0, max_idx + 1, &vb_off))
+        if (!bind_vertices(0, max_idx + 1))
             return false;
-        D3D12_VERTEX_BUFFER_VIEW vbv{};
-        vbv.BufferLocation = vb_off;
-        vbv.SizeInBytes = (max_idx + 1) * 12u;
-        vbv.StrideInBytes = 12;
-        list->IASetVertexBuffers(0, 1, &vbv);
-        D3D12_INDEX_BUFFER_VIEW ibv{};
-        ibv.BufferLocation = m_vtx_gpu + idx_off;
-        ibv.SizeInBytes = static_cast<UINT>(idx_need);
-        ibv.Format = (tsize == 2) ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
-        list->IASetIndexBuffer(&ibv);
-        list->DrawIndexedInstanced(elems, 1, 0, 0, 0);
+        if (topo.approx)
+        {
+            // 1.1.4: quads / quad_strip / polygon / fan / line_loop -> real
+            // triangle (or closed line-strip) indices, always R32.
+            std::vector<u32> exp;
+            expand_primitive(dc.primitive, gidx, exp);
+            if (!draw_u32_indices(exp))
+                return false;
+        }
+        else
+        {
+            const UINT64 idx_need = static_cast<UINT64>(elems) * tsize;
+            const UINT64 idx_off = (m_up_cursor + 3ull) & ~3ull;
+            if (idx_off + idx_need > (8ull << 20))
+            {
+                slice_note_skip(kSkipOverflow);
+                return false;
+            }
+            u8* idx_dst = m_vtx_cpu + idx_off;
+            for (u32 i = 0; i < elems; ++i)
+            {
+                if (tsize == 2)
+                {
+                    const u16 v16 = static_cast<u16>(gidx[i]);
+                    std::memcpy(idx_dst + i * 2, &v16, 2);
+                }
+                else
+                {
+                    std::memcpy(idx_dst + i * 4, &gidx[i], 4);
+                }
+            }
+            m_up_cursor = idx_off + idx_need;
+            D3D12_INDEX_BUFFER_VIEW ibv{};
+            ibv.BufferLocation = m_vtx_gpu + idx_off;
+            ibv.SizeInBytes = static_cast<UINT>(idx_need);
+            ibv.Format = (tsize == 2) ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
+            list->IASetIndexBuffer(&ibv);
+            list->DrawIndexedInstanced(elems, 1, 0, 0, 0);
+        }
     }
     else
     {
-        // Array draw: one upload covering the subrange union, one
-        // DrawInstanced per subrange.
+        // Array draw: one upload covering the subrange union, then either one
+        // DrawInstanced per subrange (native topologies) or, for the expanded
+        // classes (1.1.4), one indexed draw over the expanded index list.
         const auto& subs = dc.get_subranges();
         if (subs.empty())
         {
@@ -934,19 +1153,41 @@ bool D3D12GSRender::slice_try_real_draw()
             slice_note_skip(kSkipLayout);
             return false;
         }
-        UINT64 vb_off = 0;
-        if (!upload_pos_range(lo, hi - lo, &vb_off))
+        if (!bind_vertices(lo, hi - lo))
             return false;
-        D3D12_VERTEX_BUFFER_VIEW vbv{};
-        vbv.BufferLocation = vb_off;
-        vbv.SizeInBytes = (hi - lo) * 12u;
-        vbv.StrideInBytes = 12;
-        list->IASetVertexBuffers(0, 1, &vbv);
-        for (const auto& s : subs)
+        if (topo.approx)
         {
-            if (s.count == 0)
-                continue;
-            list->DrawInstanced(s.count, 1, s.first - lo, 0);
+            std::vector<u32> exp, ids, part;
+            for (const auto& s : subs)
+            {
+                if (s.count == 0)
+                    continue;
+                ids.resize(s.count);
+                for (u32 k = 0; k < s.count; ++k)
+                    ids[k] = (s.first - lo) + k;
+                expand_primitive(dc.primitive, ids, part);
+                if (dc.primitive == rsx::primitive_type::line_loop && !part.empty() && !exp.empty())
+                {
+                    // Separate subranges of a line loop stay separate loops;
+                    // a strip cannot be broken without primitive restart, so
+                    // draw each loop on its own.
+                    if (!draw_u32_indices(part))
+                        return false;
+                    continue;
+                }
+                exp.insert(exp.end(), part.begin(), part.end());
+            }
+            if (!exp.empty() && !draw_u32_indices(exp))
+                return false;
+        }
+        else
+        {
+            for (const auto& s : subs)
+            {
+                if (s.count == 0)
+                    continue;
+                list->DrawInstanced(s.count, 1, s.first - lo, 0);
+            }
         }
     }
 
@@ -998,7 +1239,7 @@ void D3D12GSRender::slice_present(const rsx::display_flip_info_t& info)
     // scratch RTV, ignoring the guest display buffer nonzero test below.
     // Tests whether the real draws are hidden behind a stale-black guest
     // display buffer with one nonzero word. See BOOT-DIAG-FORCE-SCRATCH.
-    static const bool kForceScratchDiag = true;
+    static const bool kForceScratchDiag = false; // 1.1.4: off (was a 1.0.38 diagnostic)
     {
         static bool force_scratch_logged = false;
         if (kForceScratchDiag && !force_scratch_logged)
