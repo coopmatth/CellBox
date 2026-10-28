@@ -464,6 +464,7 @@ boot_outcome boot_phase(const std::string& localStateUtf8,
     g_cfg.net.net_active.set(np_internet_status::enabled);
     g_cfg.net.psn_status.set(np_psn_status::psn_fake);
     g_cfg.audio.renderer.set(audio_renderer::null);
+    g_cfg.audio.channels.set(audio_channel_layout::stereo); // Fix layout 0 crash
     g_cfg.io.camera.set(camera_handler::null);
     g_cfg.core.ppu_decoder.set(ppu_decoder_type::_static);
     g_cfg.core.spu_decoder.set(spu_decoder_type::_static);
