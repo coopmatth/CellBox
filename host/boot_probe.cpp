@@ -87,7 +87,7 @@ const char* boot_result_name(int code)
     case game_boot_result::savestate_corrupted: return "savestate_corrupted";
     case game_boot_result::savestate_version_unsupported: return "savestate_version_unsupported";
     case game_boot_result::still_running: return "still_running";
-    case game_boot_result::already_added: return "already_added";
+    case game_boot_result::already_added: return "currently_restricted";
     case game_boot_result::currently_restricted: return "currently_restricted";
     case game_boot_result::database_config_missing: return "database_config_missing";
     default: return "unknown";
@@ -460,11 +460,11 @@ boot_outcome boot_phase(const std::string& localStateUtf8,
     // fixup_settings forces psn_status=disabled when net_active is
     // disabled, so Simulated requires net=enabled AND psn=psn_fake.
     g_cfg.video.renderer.set(video_renderer::null);
+    g_cfg.audio.channels.set(audio_channels_layout::stereo); // 1.0.44 fix: prevent layout 0 cellAudio crash
     g_cfg.core.llvm_threads.set(1);
     g_cfg.net.net_active.set(np_internet_status::enabled);
     g_cfg.net.psn_status.set(np_psn_status::psn_fake);
     g_cfg.audio.renderer.set(audio_renderer::null);
-    g_cfg.audio.channels.set(audio_channel_layout::stereo); // Fix layout 0 crash
     g_cfg.io.camera.set(camera_handler::null);
     g_cfg.core.ppu_decoder.set(ppu_decoder_type::_static);
     g_cfg.core.spu_decoder.set(spu_decoder_type::_static);
